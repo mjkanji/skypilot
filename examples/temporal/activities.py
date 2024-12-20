@@ -40,111 +40,64 @@ async def run_subprocess_with_streams(command) -> tuple[int, str, str]:
 
     # Wait for the process to finish
     returncode = await proc.wait()
+    stdout = "\n".join(stdout_lines)
+    stderr = "\n".join(stderr_lines)
 
-    return returncode, "\n".join(stdout_lines), "\n".join(stderr_lines)
+    if returncode == 0:
+        activity.logger.info(f"{command} output: {stdout}")
+    else:
+        activity.logger.error(f"{command} failed with error: {stderr}")
+        raise Exception(f"{command} failed.\nStdout: {stdout}\nStderr:{stderr}")
+
+    return returncode, stdout, stderr
+
+
+async def run_git_clone(repo_url: str, clone_path: str) -> None:
+    activity.logger.info(f"Cloning git repository: {repo_url} to {clone_path}")
+
+    # Create clone path if it doesn't exist
+    os.makedirs(clone_path, exist_ok=True)
+
+    # Check if the repository already exists
+    if os.path.exists(os.path.join(clone_path, ".git")):
+        # If it exists, pull the latest changes
+        command = f"git -C {clone_path} pull"
+    else:
+        # If it doesn't exist, clone the repository
+        command = f"git clone {repo_url} {clone_path}"
+
+    returncode, stdout, stderr = await run_subprocess_with_streams(command)
 
 
 @dataclass
-class SkyLaunchCommand:
+class SkyTaskCommand:
     cluster_name: str
     entrypoint: str
     flags: str
-
-
-@dataclass
-class SkyDownCommand:
-    cluster_name: str
-
-
-@dataclass
-class SkyExecCommand:
-    cluster_name: str
-    entrypoint: str
-    flags: str
-
-
-@activity.defn
-async def run_sky_launch(input: SkyLaunchCommand) -> str:
-    activity.logger.info(
-        f"Running Sky Launch on cluster: {input.cluster_name} "
-        f"with entrypoint: {input.entrypoint} and flags: {input.flags}"
-    )
-
-    # Run the provided SkyPilot command using subprocess
-    command = f"sky launch -y -c {input.cluster_name} {input.flags} {input.entrypoint}"
-    returncode, stdout, stderr = await run_subprocess_with_streams(command)
-
-    if returncode == 0:
-        activity.logger.info(f"Sky launch output: {stdout}")
-        return stdout  # Return the output from the subprocess
-    else:
-        activity.logger.error(f"Sky launch failed with error: {stderr}")
-        raise Exception(f"sky launch failed.\nStdout: {stdout}\nStderr:{stderr}")
-
-
-@activity.defn
-async def run_sky_down(input: SkyDownCommand) -> str:
-    activity.logger.info(f"Running Sky Down on cluster: {input.cluster_name}")
-
-    # Run the sky down command using subprocess
-    command = f"sky down -y {input.cluster_name}"
-    returncode, stdout, stderr = await run_subprocess_with_streams(command)
-
-    if returncode == 0:
-        activity.logger.info(f"Sky down output: {stdout}")
-        return stdout  # Return the output from the subprocess
-    else:
-        activity.logger.error(f"Sky down failed with error: {stderr}")
-        raise Exception(f"Sky down failed.\nStdout: {stdout}\nStderr:{stderr}")
-
-
-@activity.defn
-async def run_sky_exec(input: SkyExecCommand) -> str:
-    activity.logger.info(
-        f"Running Sky exec on cluster: {input.cluster_name} "
-        f"with entrypoint: {input.entrypoint} and flags: {input.flags}"
-    )
-
-    # Run the sky exec command using subprocess
-    command = f"sky exec {input.cluster_name} {input.flags} {input.entrypoint}"
-    returncode, stdout, stderr = await run_subprocess_with_streams(command)
-
-    if returncode == 0:
-        activity.logger.info(f"Sky exec output: {stdout}")
-        return stdout  # Return the output from the subprocess
-    else:
-        activity.logger.error(f"Sky exec failed with error: {stderr}")
-        raise Exception(f"sky exec failed.\nStdout: {stdout}\nStderr:{stderr}")
-
-
-@dataclass
-class GitCloneInput:
     repo_url: str
     clone_path: str
 
 
 @activity.defn
-async def run_git_clone(input: GitCloneInput) -> str:
+async def run_sky_task(input: SkyTaskCommand) -> str:
+    # Clone the tasks repo to the worker
+    await run_git_clone(input.repo_url, input.clone_path)
+
+    # Provision the cluster and run the task
+    # Always run with --down flag to ensure that any failures on the worker do not leave us with
+    # "orphaned" resources.
     activity.logger.info(
-        f"Cloning git repository: {input.repo_url} to {input.clone_path}"
+        f"Running Sky Launch on cluster: {input.cluster_name} "
+        f"with entrypoint: {input.entrypoint} and flags: {input.flags}"
     )
+    command = (
+        f"sky launch -y -c {input.cluster_name} --down {input.flags} {input.entrypoint}"
+    )
+    _ = await run_subprocess_with_streams(command)
 
-    # Create clone path if it doesn't exist
-    os.makedirs(input.clone_path, exist_ok=True)
+    # Run the sky down command using subprocess
+    activity.logger.info(f"Running Sky Down on cluster: {input.cluster_name}")
+    command = f"sky down -y {input.cluster_name}"
+    _ = await run_subprocess_with_streams(command)
 
-    # Check if the repository already exists
-    if os.path.exists(os.path.join(input.clone_path, ".git")):
-        # If it exists, pull the latest changes
-        command = f"git -C {input.clone_path} pull"
-    else:
-        # If it doesn't exist, clone the repository
-        command = f"git clone {input.repo_url} {input.clone_path}"
-
-    returncode, stdout, stderr = await run_subprocess_with_streams(command)
-
-    if returncode == 0:
-        activity.logger.info(f"git clone output: {stdout}")
-        return stdout  # Return the output from the subprocess
-    else:
-        activity.logger.error(f"git clone failed with error: {stderr}")
-        raise Exception(f"git clone failed.\nStdout: {stdout}\nStderr:{stderr}")
+    return "Success!"

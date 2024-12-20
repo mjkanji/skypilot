@@ -1,6 +1,6 @@
 import asyncio
 
-from activities import run_git_clone, run_sky_down, run_sky_exec, run_sky_launch
+from activities import run_sky_task
 from temporalio.client import Client
 from temporalio.worker import Worker
 from workflows import SkyPilotWorkflow
@@ -16,12 +16,7 @@ async def main() -> None:
         client,
         task_queue="skypilot-task-queue",
         workflows=[SkyPilotWorkflow],
-        activities=[
-            run_sky_launch,
-            run_sky_down,
-            run_sky_exec,
-            run_git_clone,
-        ],  # Register all Sky activities to the same worker
+        activities=[run_sky_task],  # Register all Sky activities to the same worker
     )
     await worker.run()
 
